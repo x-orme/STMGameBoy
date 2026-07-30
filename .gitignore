@@ -1,0 +1,34 @@
+# Personal files
+.vscode/
+
+# STM32CubeIDE workspace
+.metadata/
+.settings/
+
+# STM32 build outputs
+Debug/
+Release/
+build/
+
+*.elf
+*.hex
+*.bin
+*.map
+*.list
+*.o
+*.obj
+*.d
+*.su
+
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor temporary files
+*.swp
+*.swo
+*~
+*.tmp
+*.temp
