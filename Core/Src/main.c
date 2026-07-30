@@ -22,6 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
 
 /* USER CODE END Includes */
 
@@ -59,6 +60,7 @@ SDRAM_HandleTypeDef hsdram1;
 
 osThreadId defaultTaskHandle;
 /* USER CODE BEGIN PV */
+static volatile uint16_t joystickAdcValues[2] = {0U, 0U};
 
 /* USER CODE END PV */
 
@@ -123,6 +125,15 @@ int main(void)
   MX_ADC1_Init();
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
+  if (HAL_ADC_Start_DMA(&hadc1, (uint32_t *)joystickAdcValues, 2U) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  if (HAL_TIM_Base_Start(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
 
   /* USER CODE END 2 */
 
@@ -735,10 +746,25 @@ static void MX_GPIO_Init(void)
 void StartDefaultTask(void const * argument)
 {
   /* USER CODE BEGIN 5 */
+  char uartMessage[64];
+
   /* Infinite loop */
-  for(;;)
+  for (;;)
   {
-    osDelay(1);
+    uint16_t joystickX = joystickAdcValues[0];
+    uint16_t joystickY = joystickAdcValues[1];
+    int messageLength = snprintf(uartMessage, sizeof(uartMessage),
+                                 "Joystick X: %u, Y: %u\r\n",
+                                 (unsigned int)joystickX,
+                                 (unsigned int)joystickY);
+
+    if (messageLength > 0)
+    {
+      HAL_UART_Transmit(&huart1, (uint8_t *)uartMessage,
+                        (uint16_t)messageLength, 100U);
+    }
+
+    osDelay(100U);
   }
   /* USER CODE END 5 */
 }
