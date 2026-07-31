@@ -789,29 +789,47 @@ void StartInputTask(void const * argument)
   {
     uint16_t joystickX = JOYSTICK_ADC_MAX - joystickAdcValues[1];
     uint16_t joystickY = joystickAdcValues[0];
-    const char *status = "CENTER";
+    const char *joystickStatus = "CENTER";
+    const char *buttonStatus = "NONE";
+
+    if (HAL_GPIO_ReadPin(btnA_GPIO_Port, btnA_Pin) == GPIO_PIN_RESET)
+    {
+      buttonStatus = "A";
+    }
+    else if (HAL_GPIO_ReadPin(btnB_GPIO_Port, btnB_Pin) == GPIO_PIN_RESET)
+    {
+      buttonStatus = "B";
+    }
+    else if (HAL_GPIO_ReadPin(btnSelect_GPIO_Port, btnSelect_Pin) == GPIO_PIN_RESET)
+    {
+      buttonStatus = "SELECT";
+    }
+    else if (HAL_GPIO_ReadPin(btnStart_GPIO_Port, btnStart_Pin) == GPIO_PIN_RESET)
+    {
+      buttonStatus = "START";
+    }
 
     if (joystickX < JOYSTICK_LOW_THRESHOLD)
     {
-      status = "LEFT";
+      joystickStatus = "LEFT";
     }
     else if (joystickX > JOYSTICK_HIGH_THRESHOLD)
     {
-      status = "RIGHT";
+      joystickStatus = "RIGHT";
     }
 
-    if (joystickY < JOYSTICK_LOW_THRESHOLD)
+    if (joystickY < JOYSTICK_LOW_THRESHOLD)                                               
     {
-      status = "UP";
+      joystickStatus = "UP";
     }
     else if (joystickY > JOYSTICK_HIGH_THRESHOLD)
     {
-      status = "DOWN";
+      joystickStatus = "DOWN";
     }
 
-    printf("Status: %s\n", status);
+    printf("Joystick: %s  Button: %s\n", joystickStatus, buttonStatus);
 
-    osDelay(100U);
+    osDelay(10U);
   }
   /* USER CODE END 5 */
 }
