@@ -22,7 +22,6 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdio.h>
 
 /* USER CODE END Includes */
 
@@ -40,17 +39,10 @@ typedef struct
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define JOYSTICK_ADC_MAX          4095U
-#define JOYSTICK_LOW_THRESHOLD    1000U
-#define JOYSTICK_HIGH_THRESHOLD   3000U
 #define LCD_FRAMEBUFFER_ADDRESS   0xD0000000U
 #define LCD_WIDTH                 240U
 #define LCD_HEIGHT                320U
 #define LCD_COLOR_BLACK           0x0000U
-#define LCD_COLOR_BLUE            0x001FU
-#define LCD_COLOR_GREEN           0x07E0U
-#define LCD_COLOR_RED             0xF800U
-#define LCD_COLOR_MAGENTA         0xF81FU
 #define SDRAM_REFRESH_COUNT       1386U
 #define SDRAM_TIMEOUT             0xFFFFU
 
@@ -81,7 +73,7 @@ SDRAM_HandleTypeDef hsdram1;
 osThreadId inputTaskHandle;
 osThreadId displayTaskHandle;
 /* USER CODE BEGIN PV */
-static volatile uint16_t joystickAdcValues[2];
+volatile uint16_t joystickAdcValues[2];
 static const LcdInitCommand lcdInitSequence[] =
 {
   {0xCA, 3,   0, {0xC3, 0x08, 0x50}},
@@ -106,10 +98,8 @@ static const LcdInitCommand lcdInitSequence[] =
   {0xF6, 3,   0, {0x01, 0x00, 0x06}},
   {0x2C, 0, 200, {0}},
   {0x26, 1,   0, {0x01}},
-  {0xE0, 15,  0, {0x0F, 0x29, 0x24, 0x0C, 0x0E, 0x09, 0x4E, 0x78,
-                   0x3C, 0x09, 0x13, 0x05, 0x17, 0x11, 0x00}},
-  {0xE1, 15,  0, {0x00, 0x16, 0x1B, 0x04, 0x11, 0x07, 0x31, 0x33,
-                   0x42, 0x05, 0x0C, 0x0A, 0x28, 0x2F, 0x0F}},
+  {0xE0, 15,  0, {0x0F, 0x29, 0x24, 0x0C, 0x0E, 0x09, 0x4E, 0x78, 0x3C, 0x09, 0x13, 0x05, 0x17, 0x11, 0x00}},
+  {0xE1, 15,  0, {0x00, 0x16, 0x1B, 0x04, 0x11, 0x07, 0x31, 0x33, 0x42, 0x05, 0x0C, 0x0A, 0x28, 0x2F, 0x0F}},
   {0x11, 0, 200, {0}},
   {0x29, 0,   0, {0}},
   {0x2C, 0,   0, {0}}
@@ -136,7 +126,6 @@ void StartDisplayTask(void const * argument);
 static HAL_StatusTypeDef LCD_Write(const LcdInitCommand *item);
 static HAL_StatusTypeDef SDRAM_InitSequence(void);
 static HAL_StatusTypeDef LCD_Init(void);
-static void LCD_Fill(uint16_t color);
 
 /* USER CODE END PFP */
 
@@ -167,8 +156,7 @@ static HAL_StatusTypeDef LCD_Write(const LcdInitCommand *item)
   HAL_GPIO_WritePin(WRX_DCX_GPIO_Port, WRX_DCX_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(CSX_GPIO_Port, CSX_Pin, GPIO_PIN_RESET);
 
-  if (HAL_SPI_Transmit(&hspi5, (uint8_t *)&item->command, 1U,
-                       HAL_MAX_DELAY) != HAL_OK)
+  if (HAL_SPI_Transmit(&hspi5, (uint8_t *)&item->command, 1U, HAL_MAX_DELAY) != HAL_OK)
   {
     HAL_GPIO_WritePin(CSX_GPIO_Port, CSX_Pin, GPIO_PIN_SET);
     return HAL_ERROR;
@@ -177,8 +165,7 @@ static HAL_StatusTypeDef LCD_Write(const LcdInitCommand *item)
   if (item->length > 0U)
   {
     HAL_GPIO_WritePin(WRX_DCX_GPIO_Port, WRX_DCX_Pin, GPIO_PIN_SET);
-    if (HAL_SPI_Transmit(&hspi5, (uint8_t *)item->data, item->length,
-                         HAL_MAX_DELAY) != HAL_OK)
+    if (HAL_SPI_Transmit(&hspi5, (uint8_t *)item->data, item->length, HAL_MAX_DELAY) != HAL_OK)
     {
       HAL_GPIO_WritePin(CSX_GPIO_Port, CSX_Pin, GPIO_PIN_SET);
       return HAL_ERROR;
@@ -239,9 +226,7 @@ static HAL_StatusTypeDef LCD_Init(void)
   HAL_GPIO_WritePin(NCS_MEMS_SPI_GPIO_Port, NCS_MEMS_SPI_Pin, GPIO_PIN_SET);
   HAL_GPIO_WritePin(CSX_GPIO_Port, CSX_Pin, GPIO_PIN_SET);
 
-  for (uint32_t i = 0U;
-       i < sizeof(lcdInitSequence) / sizeof(lcdInitSequence[0]);
-       ++i)
+  for (uint32_t i = 0U; i < sizeof(lcdInitSequence) / sizeof(lcdInitSequence[0]); ++i)
   {
     if (LCD_Write(&lcdInitSequence[i]) != HAL_OK)
     {
@@ -253,10 +238,9 @@ static HAL_StatusTypeDef LCD_Init(void)
   return HAL_OK;
 }
 
-static void LCD_Fill(uint16_t color)
+void LCD_Fill(uint16_t color)
 {
-  volatile uint16_t *framebuffer =
-      (volatile uint16_t *)LCD_FRAMEBUFFER_ADDRESS;
+  volatile uint16_t *framebuffer = (volatile uint16_t *)LCD_FRAMEBUFFER_ADDRESS;
 
   for (uint32_t i = 0U; i < LCD_WIDTH * LCD_HEIGHT; ++i)
   {
@@ -936,97 +920,6 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 
 /* USER CODE END 4 */
-
-/* USER CODE BEGIN Header_StartInputTask */
-/**
-  * @brief  Function implementing the inputTask thread.
-  * @param  argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_StartInputTask */
-void StartInputTask(void const * argument)
-{
-  /* USER CODE BEGIN 5 */
-
-  /* Infinite loop */
-  for (;;)
-  {
-    uint16_t joystickX = JOYSTICK_ADC_MAX - joystickAdcValues[1];
-    uint16_t joystickY = joystickAdcValues[0];
-    const char *joystickStatus = "CENTER";
-    const char *buttonStatus = "NONE";
-
-    if (HAL_GPIO_ReadPin(btnA_GPIO_Port, btnA_Pin) == GPIO_PIN_RESET)
-    {
-      buttonStatus = "A";
-    }
-    else if (HAL_GPIO_ReadPin(btnB_GPIO_Port, btnB_Pin) == GPIO_PIN_RESET)
-    {
-      buttonStatus = "B";
-    }
-    else if (HAL_GPIO_ReadPin(btnSelect_GPIO_Port, btnSelect_Pin) == GPIO_PIN_RESET)
-    {
-      buttonStatus = "SELECT";
-    }
-    else if (HAL_GPIO_ReadPin(btnStart_GPIO_Port, btnStart_Pin) == GPIO_PIN_RESET)
-    {
-      buttonStatus = "START";
-    }
-
-    if (joystickX < JOYSTICK_LOW_THRESHOLD)
-    {
-      joystickStatus = "LEFT";
-    }
-    else if (joystickX > JOYSTICK_HIGH_THRESHOLD)
-    {
-      joystickStatus = "RIGHT";
-    }
-
-    if (joystickY < JOYSTICK_LOW_THRESHOLD)                                               
-    {
-      joystickStatus = "UP";
-    }
-    else if (joystickY > JOYSTICK_HIGH_THRESHOLD)
-    {
-      joystickStatus = "DOWN";
-    }
-
-    printf("Joystick: %s  Button: %s\n", joystickStatus, buttonStatus);
-
-    osDelay(10U);
-  }
-  /* USER CODE END 5 */
-}
-
-/* USER CODE BEGIN Header_StartDisplayTask */
-/**
-* @brief Function implementing the displayTask thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartDisplayTask */
-void StartDisplayTask(void const * argument)
-{
-  /* USER CODE BEGIN StartDisplayTask */
-  static const uint16_t colors[] =
-  {
-    LCD_COLOR_RED,
-    LCD_COLOR_GREEN,
-    LCD_COLOR_BLUE,
-    LCD_COLOR_MAGENTA,
-    LCD_COLOR_BLACK
-  };
-  uint32_t colorIndex = 0U;
-
-  /* Infinite loop */
-  for (;;)
-  {
-    LCD_Fill(colors[colorIndex]);
-    colorIndex = (colorIndex + 1U) % (sizeof(colors) / sizeof(colors[0]));
-    osDelay(1000U);
-  }
-  /* USER CODE END StartDisplayTask */
-}
 
 /**
   * @brief  Period elapsed callback in non blocking mode

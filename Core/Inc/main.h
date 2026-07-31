@@ -53,6 +53,7 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
+void LCD_Fill(uint16_t color);
 
 /* USER CODE END EFP */
 
