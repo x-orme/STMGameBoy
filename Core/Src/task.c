@@ -1,5 +1,6 @@
 #include "main.h"
 #include "cmsis_os.h"
+#include "peanut_gb.h"
 
 #include <stdio.h>
 
