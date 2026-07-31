@@ -61,7 +61,8 @@ UART_HandleTypeDef huart1;
 
 SDRAM_HandleTypeDef hsdram1;
 
-osThreadId defaultTaskHandle;
+osThreadId inputTaskHandle;
+osThreadId displayTaskHandle;
 /* USER CODE BEGIN PV */
 static volatile uint16_t joystickAdcValues[2];
 
@@ -79,7 +80,8 @@ static void MX_TIM1_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM3_Init(void);
-void StartDefaultTask(void const * argument);
+void StartInputTask(void const * argument);
+void StartDisplayTask(void const * argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -177,9 +179,13 @@ int main(void)
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* definition and creation of defaultTask */
-  osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 4096);
-  defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
+  /* definition and creation of inputTask */
+  osThreadDef(inputTask, StartInputTask, osPriorityNormal, 0, 512);
+  inputTaskHandle = osThreadCreate(osThread(inputTask), NULL);
+
+  /* definition and creation of displayTask */
+  osThreadDef(displayTask, StartDisplayTask, osPriorityBelowNormal, 0, 1024);
+  displayTaskHandle = osThreadCreate(osThread(displayTask), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -767,14 +773,14 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE END 4 */
 
-/* USER CODE BEGIN Header_StartDefaultTask */
+/* USER CODE BEGIN Header_StartInputTask */
 /**
-  * @brief  Function implementing the defaultTask thread.
+  * @brief  Function implementing the inputTask thread.
   * @param  argument: Not used
   * @retval None
   */
-/* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void const * argument)
+/* USER CODE END Header_StartInputTask */
+void StartInputTask(void const * argument)
 {
   /* USER CODE BEGIN 5 */
 
@@ -808,6 +814,24 @@ void StartDefaultTask(void const * argument)
     osDelay(100U);
   }
   /* USER CODE END 5 */
+}
+
+/* USER CODE BEGIN Header_StartDisplayTask */
+/**
+* @brief Function implementing the displayTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartDisplayTask */
+void StartDisplayTask(void const * argument)
+{
+  /* USER CODE BEGIN StartDisplayTask */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END StartDisplayTask */
 }
 
 /**
