@@ -10,6 +10,7 @@ Debug/
 Release/
 build/
 
+*.launch
 *.elf
 *.hex
 *.bin
