@@ -28,6 +28,13 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+typedef struct
+{
+  uint8_t command;
+  uint8_t length;
+  uint16_t delay;
+  uint8_t data[15];
+} LcdInitCommand;
 
 /* USER CODE END PTD */
 
@@ -36,6 +43,16 @@
 #define JOYSTICK_ADC_MAX          4095U
 #define JOYSTICK_LOW_THRESHOLD    1000U
 #define JOYSTICK_HIGH_THRESHOLD   3000U
+#define LCD_FRAMEBUFFER_ADDRESS   0xD0000000U
+#define LCD_WIDTH                 240U
+#define LCD_HEIGHT                320U
+#define LCD_COLOR_BLACK           0x0000U
+#define LCD_COLOR_BLUE            0x001FU
+#define LCD_COLOR_GREEN           0x07E0U
+#define LCD_COLOR_RED             0xF800U
+#define LCD_COLOR_MAGENTA         0xF81FU
+#define SDRAM_REFRESH_COUNT       1386U
+#define SDRAM_TIMEOUT             0xFFFFU
 
 /* USER CODE END PD */
 
@@ -65,6 +82,38 @@ osThreadId inputTaskHandle;
 osThreadId displayTaskHandle;
 /* USER CODE BEGIN PV */
 static volatile uint16_t joystickAdcValues[2];
+static const LcdInitCommand lcdInitSequence[] =
+{
+  {0xCA, 3,   0, {0xC3, 0x08, 0x50}},
+  {0xCF, 3,   0, {0x00, 0xC1, 0x30}},
+  {0xED, 4,   0, {0x64, 0x03, 0x12, 0x81}},
+  {0xE8, 3,   0, {0x85, 0x00, 0x78}},
+  {0xCB, 5,   0, {0x39, 0x2C, 0x00, 0x34, 0x02}},
+  {0xF7, 1,   0, {0x20}},
+  {0xEA, 2,   0, {0x00, 0x00}},
+  {0xB1, 2,   0, {0x00, 0x1B}},
+  {0xB6, 2,   0, {0x0A, 0xA2}},
+  {0xC0, 1,   0, {0x10}},
+  {0xC1, 1,   0, {0x10}},
+  {0xC5, 2,   0, {0x45, 0x15}},
+  {0xC7, 1,   0, {0x90}},
+  {0x36, 1,   0, {0xC8}},
+  {0xF2, 1,   0, {0x00}},
+  {0xB0, 1,   0, {0xC2}},
+  {0xB6, 4,   0, {0x0A, 0xA7, 0x27, 0x04}},
+  {0x2A, 4,   0, {0x00, 0x00, 0x00, 0xEF}},
+  {0x2B, 4,   0, {0x00, 0x00, 0x01, 0x3F}},
+  {0xF6, 3,   0, {0x01, 0x00, 0x06}},
+  {0x2C, 0, 200, {0}},
+  {0x26, 1,   0, {0x01}},
+  {0xE0, 15,  0, {0x0F, 0x29, 0x24, 0x0C, 0x0E, 0x09, 0x4E, 0x78,
+                   0x3C, 0x09, 0x13, 0x05, 0x17, 0x11, 0x00}},
+  {0xE1, 15,  0, {0x00, 0x16, 0x1B, 0x04, 0x11, 0x07, 0x31, 0x33,
+                   0x42, 0x05, 0x0C, 0x0A, 0x28, 0x2F, 0x0F}},
+  {0x11, 0, 200, {0}},
+  {0x29, 0,   0, {0}},
+  {0x2C, 0,   0, {0}}
+};
 
 /* USER CODE END PV */
 
@@ -84,6 +133,10 @@ void StartInputTask(void const * argument);
 void StartDisplayTask(void const * argument);
 
 /* USER CODE BEGIN PFP */
+static HAL_StatusTypeDef LCD_Write(const LcdInitCommand *item);
+static HAL_StatusTypeDef SDRAM_InitSequence(void);
+static HAL_StatusTypeDef LCD_Init(void);
+static void LCD_Fill(uint16_t color);
 
 /* USER CODE END PFP */
 
@@ -107,6 +160,108 @@ int __io_getchar(void)
 		;
 	}
 	return ch;
+}
+
+static HAL_StatusTypeDef LCD_Write(const LcdInitCommand *item)
+{
+  HAL_GPIO_WritePin(WRX_DCX_GPIO_Port, WRX_DCX_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(CSX_GPIO_Port, CSX_Pin, GPIO_PIN_RESET);
+
+  if (HAL_SPI_Transmit(&hspi5, (uint8_t *)&item->command, 1U,
+                       HAL_MAX_DELAY) != HAL_OK)
+  {
+    HAL_GPIO_WritePin(CSX_GPIO_Port, CSX_Pin, GPIO_PIN_SET);
+    return HAL_ERROR;
+  }
+
+  if (item->length > 0U)
+  {
+    HAL_GPIO_WritePin(WRX_DCX_GPIO_Port, WRX_DCX_Pin, GPIO_PIN_SET);
+    if (HAL_SPI_Transmit(&hspi5, (uint8_t *)item->data, item->length,
+                         HAL_MAX_DELAY) != HAL_OK)
+    {
+      HAL_GPIO_WritePin(CSX_GPIO_Port, CSX_Pin, GPIO_PIN_SET);
+      return HAL_ERROR;
+    }
+  }
+
+  HAL_GPIO_WritePin(CSX_GPIO_Port, CSX_Pin, GPIO_PIN_SET);
+
+  if (item->delay > 0U)
+  {
+    HAL_Delay(item->delay);
+  }
+
+  return HAL_OK;
+}
+
+static HAL_StatusTypeDef SDRAM_InitSequence(void)
+{
+  FMC_SDRAM_CommandTypeDef command = {0};
+
+  command.CommandTarget = FMC_SDRAM_CMD_TARGET_BANK2;
+  command.AutoRefreshNumber = 1U;
+
+  command.CommandMode = FMC_SDRAM_CMD_CLK_ENABLE;
+  if (HAL_SDRAM_SendCommand(&hsdram1, &command, SDRAM_TIMEOUT) != HAL_OK)
+  {
+    return HAL_ERROR;
+  }
+
+  HAL_Delay(1U);
+
+  command.CommandMode = FMC_SDRAM_CMD_PALL;
+  if (HAL_SDRAM_SendCommand(&hsdram1, &command, SDRAM_TIMEOUT) != HAL_OK)
+  {
+    return HAL_ERROR;
+  }
+
+  command.CommandMode = FMC_SDRAM_CMD_AUTOREFRESH_MODE;
+  command.AutoRefreshNumber = 4U;
+  if (HAL_SDRAM_SendCommand(&hsdram1, &command, SDRAM_TIMEOUT) != HAL_OK)
+  {
+    return HAL_ERROR;
+  }
+
+  command.CommandMode = FMC_SDRAM_CMD_LOAD_MODE;
+  command.AutoRefreshNumber = 1U;
+  command.ModeRegisterDefinition = 0x0230U;
+  if (HAL_SDRAM_SendCommand(&hsdram1, &command, SDRAM_TIMEOUT) != HAL_OK)
+  {
+    return HAL_ERROR;
+  }
+
+  return HAL_SDRAM_ProgramRefreshRate(&hsdram1, SDRAM_REFRESH_COUNT);
+}
+
+static HAL_StatusTypeDef LCD_Init(void)
+{
+  HAL_GPIO_WritePin(NCS_MEMS_SPI_GPIO_Port, NCS_MEMS_SPI_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(CSX_GPIO_Port, CSX_Pin, GPIO_PIN_SET);
+
+  for (uint32_t i = 0U;
+       i < sizeof(lcdInitSequence) / sizeof(lcdInitSequence[0]);
+       ++i)
+  {
+    if (LCD_Write(&lcdInitSequence[i]) != HAL_OK)
+    {
+      return HAL_ERROR;
+    }
+  }
+
+  LCD_Fill(LCD_COLOR_BLACK);
+  return HAL_OK;
+}
+
+static void LCD_Fill(uint16_t color)
+{
+  volatile uint16_t *framebuffer =
+      (volatile uint16_t *)LCD_FRAMEBUFFER_ADDRESS;
+
+  for (uint32_t i = 0U; i < LCD_WIDTH * LCD_HEIGHT; ++i)
+  {
+    framebuffer[i] = color;
+  }
 }
 
 /* USER CODE END 0 */
@@ -150,6 +305,11 @@ int main(void)
   MX_ADC1_Init();
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
+  if (LCD_Init() != HAL_OK)
+  {
+    Error_Handler();
+  }
+
   if (HAL_ADC_Start_DMA(&hadc1, (uint32_t *)joystickAdcValues, 2U) != HAL_OK)
   {
     Error_Handler();
@@ -640,6 +800,10 @@ static void MX_FMC_Init(void)
   }
 
   /* USER CODE BEGIN FMC_Init 2 */
+  if (SDRAM_InitSequence() != HAL_OK)
+  {
+    Error_Handler();
+  }
 
   /* USER CODE END FMC_Init 2 */
 }
@@ -844,10 +1008,22 @@ void StartInputTask(void const * argument)
 void StartDisplayTask(void const * argument)
 {
   /* USER CODE BEGIN StartDisplayTask */
-  /* Infinite loop */
-  for(;;)
+  static const uint16_t colors[] =
   {
-    osDelay(1);
+    LCD_COLOR_RED,
+    LCD_COLOR_GREEN,
+    LCD_COLOR_BLUE,
+    LCD_COLOR_MAGENTA,
+    LCD_COLOR_BLACK
+  };
+  uint32_t colorIndex = 0U;
+
+  /* Infinite loop */
+  for (;;)
+  {
+    LCD_Fill(colors[colorIndex]);
+    colorIndex = (colorIndex + 1U) % (sizeof(colors) / sizeof(colors[0]));
+    osDelay(1000U);
   }
   /* USER CODE END StartDisplayTask */
 }
