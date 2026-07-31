@@ -33,6 +33,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define JOYSTICK_ADC_MAX          4095U
+#define JOYSTICK_LOW_THRESHOLD    1000U
+#define JOYSTICK_HIGH_THRESHOLD   3000U
 
 /* USER CODE END PD */
 
@@ -60,7 +63,7 @@ SDRAM_HandleTypeDef hsdram1;
 
 osThreadId defaultTaskHandle;
 /* USER CODE BEGIN PV */
-static volatile uint16_t joystickAdcValues[2] = {0U, 0U};
+static volatile uint16_t joystickAdcValues[2];
 
 /* USER CODE END PV */
 
@@ -84,6 +87,25 @@ void StartDefaultTask(void const * argument);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+int __io_putchar(int ch)
+{
+ if ( ch == '\n' )
+	 HAL_UART_Transmit(&huart1, (uint8_t*)&"\r", 1, HAL_MAX_DELAY);
+ HAL_UART_Transmit(&huart1, (uint8_t*)&ch, 1, HAL_MAX_DELAY);
+ return ch;
+}
+
+int __io_getchar(void)
+{
+	uint8_t ch;
+
+	while( HAL_OK != HAL_UART_Receive(&huart1, &ch, 1, HAL_MAX_DELAY) )
+	{
+		;
+	}
+	return ch;
+}
 
 /* USER CODE END 0 */
 
@@ -628,13 +650,13 @@ static void MX_GPIO_Init(void)
 /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOG_CLK_ENABLE();
-  __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
@@ -648,6 +670,12 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOG, LD3_Pin|LD4_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pins : btnA_Pin btnB_Pin btnSelect_Pin btnStart_Pin */
+  GPIO_InitStruct.Pin = btnA_Pin|btnB_Pin|btnSelect_Pin|btnStart_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
   /*Configure GPIO pins : NCS_MEMS_SPI_Pin CSX_Pin OTG_FS_PSO_Pin */
   GPIO_InitStruct.Pin = NCS_MEMS_SPI_Pin|CSX_Pin|OTG_FS_PSO_Pin;
@@ -749,23 +777,33 @@ static void MX_GPIO_Init(void)
 void StartDefaultTask(void const * argument)
 {
   /* USER CODE BEGIN 5 */
-  char uartMessage[64];
 
   /* Infinite loop */
   for (;;)
   {
-    uint16_t joystickX = joystickAdcValues[0];
-    uint16_t joystickY = joystickAdcValues[1];
-    int messageLength = snprintf(uartMessage, sizeof(uartMessage),
-                                 "Joystick X: %u, Y: %u\r\n",
-                                 (unsigned int)joystickX,
-                                 (unsigned int)joystickY);
+    uint16_t joystickX = JOYSTICK_ADC_MAX - joystickAdcValues[1];
+    uint16_t joystickY = joystickAdcValues[0];
+    const char *status = "CENTER";
 
-    if (messageLength > 0)
+    if (joystickX < JOYSTICK_LOW_THRESHOLD)
     {
-      HAL_UART_Transmit(&huart1, (uint8_t *)uartMessage,
-                        (uint16_t)messageLength, 100U);
+      status = "LEFT";
     }
+    else if (joystickX > JOYSTICK_HIGH_THRESHOLD)
+    {
+      status = "RIGHT";
+    }
+
+    if (joystickY < JOYSTICK_LOW_THRESHOLD)
+    {
+      status = "UP";
+    }
+    else if (joystickY > JOYSTICK_HIGH_THRESHOLD)
+    {
+      status = "DOWN";
+    }
+
+    printf("Status: %s\n", status);
 
     osDelay(100U);
   }
