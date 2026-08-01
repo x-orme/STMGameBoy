@@ -33,3 +33,6 @@ Desktop.ini
 *~
 *.tmp
 *.temp
+
+# Game ROMs
+*.gb
