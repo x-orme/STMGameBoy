@@ -4,17 +4,18 @@
 
 #include <stdio.h>
 
-#define JOYSTICK_ADC_MAX          4095U
-#define JOYSTICK_LOW_THRESHOLD    1000U
-#define JOYSTICK_HIGH_THRESHOLD   3000U
+#define JOYSTICK_ADC_MAX          4095
+#define JOYSTICK_LOW_THRESHOLD    1000
+#define JOYSTICK_HIGH_THRESHOLD   3000
 
-#define LCD_COLOR_BLACK           0x0000U
-#define LCD_COLOR_BLUE            0x001FU
-#define LCD_COLOR_GREEN           0x07E0U
-#define LCD_COLOR_RED             0xF800U
-#define LCD_COLOR_MAGENTA         0xF81FU
+#define LCD_COLOR_BLACK           0x0000
+#define LCD_COLOR_BLUE            0x001F
+#define LCD_COLOR_GREEN           0x07E0
+#define LCD_COLOR_RED             0xF800
+#define LCD_COLOR_MAGENTA         0xF81F
 
 extern volatile uint16_t joystickAdcValues[2];
+static volatile uint8_t inputState = 0xFF;
 
 void StartInputTask(void const *argument)
 {
@@ -22,45 +23,52 @@ void StartInputTask(void const *argument)
   {
     uint16_t joystickX = JOYSTICK_ADC_MAX - joystickAdcValues[1];
     uint16_t joystickY = joystickAdcValues[0];
-    const char *joystickStatus = "CENTER";
-    const char *buttonStatus = "NONE";
+    uint8_t state = 0xFF;
 
     if (HAL_GPIO_ReadPin(btnA_GPIO_Port, btnA_Pin) == GPIO_PIN_RESET)
     {
-      buttonStatus = "A";
+      state &= (uint8_t)~JOYPAD_A;
     }
-    else if (HAL_GPIO_ReadPin(btnB_GPIO_Port, btnB_Pin) == GPIO_PIN_RESET)
+
+    if (HAL_GPIO_ReadPin(btnB_GPIO_Port, btnB_Pin) == GPIO_PIN_RESET)
     {
-      buttonStatus = "B";
+      state &= (uint8_t)~JOYPAD_B;
     }
-    else if (HAL_GPIO_ReadPin(btnSelect_GPIO_Port, btnSelect_Pin) == GPIO_PIN_RESET)
+
+    if (HAL_GPIO_ReadPin(btnSelect_GPIO_Port, btnSelect_Pin) == GPIO_PIN_RESET)
     {
-      buttonStatus = "SELECT";
+      state &= (uint8_t)~JOYPAD_SELECT;
     }
-    else if (HAL_GPIO_ReadPin(btnStart_GPIO_Port, btnStart_Pin) == GPIO_PIN_RESET)
+
+    if (HAL_GPIO_ReadPin(btnStart_GPIO_Port, btnStart_Pin) == GPIO_PIN_RESET)
     {
-      buttonStatus = "START";
+      state &= (uint8_t)~JOYPAD_START;
     }
 
     if (joystickX < JOYSTICK_LOW_THRESHOLD)
     {
-      joystickStatus = "LEFT";
+      state &= (uint8_t)~JOYPAD_LEFT;
     }
     else if (joystickX > JOYSTICK_HIGH_THRESHOLD)
     {
-      joystickStatus = "RIGHT";
+      state &= (uint8_t)~JOYPAD_RIGHT;
     }
 
     if (joystickY < JOYSTICK_LOW_THRESHOLD)
     {
-      joystickStatus = "UP";
+      state &= (uint8_t)~JOYPAD_UP;
     }
     else if (joystickY > JOYSTICK_HIGH_THRESHOLD)
     {
-      joystickStatus = "DOWN";
+      state &= (uint8_t)~JOYPAD_DOWN;
     }
 
-    printf("Joystick: %s  Button: %s\n", joystickStatus, buttonStatus);
+    if (state != inputState)
+    {
+      inputState = state;
+      printf("Input: 0x%02X\n", inputState);
+    }
+
     osDelay(10U);
   }
 }
