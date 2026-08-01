@@ -1,5 +1,6 @@
 #include "main.h"
 #include "cmsis_os.h"
+#include "gb_rom.h"
 #include "peanut_gb.h"
 
 #include <stdio.h>
@@ -8,6 +9,8 @@
 #define JOYSTICK_LOW_THRESHOLD    1000
 #define JOYSTICK_HIGH_THRESHOLD   3000
 
+#define CART_RAM_SIZE             (32 * 1024)
+
 #define LCD_COLOR_BLACK           0x0000
 #define LCD_COLOR_BLUE            0x001F
 #define LCD_COLOR_GREEN           0x07E0
@@ -15,7 +18,71 @@
 #define LCD_COLOR_MAGENTA         0xF81F
 
 extern volatile uint16_t joystickAdcValues[2];
+
+static struct gb_s gb;
+static uint8_t cartRam[CART_RAM_SIZE];
 static volatile uint8_t inputState = 0xFF;
+
+static uint8_t GB_ReadRom(struct gb_s *context, const uint_fast32_t address)
+{
+  (void)context;
+
+  if (address >= gbRomSize)
+  {
+    return 0xFF;
+  }
+
+  return gbRomData[address];
+}
+
+static uint8_t GB_ReadCartRam(struct gb_s *context, const uint_fast32_t address)
+{
+  (void)context;
+
+  if (address >= sizeof(cartRam))
+  {
+    return 0xFF;
+  }
+
+  return cartRam[address];
+}
+
+static void GB_WriteCartRam(struct gb_s *context, const uint_fast32_t address,
+                            const uint8_t value)
+{
+  (void)context;
+
+  if (address < sizeof(cartRam))
+  {
+    cartRam[address] = value;
+  }
+}
+
+static void GB_Error(struct gb_s *context, const enum gb_error_e error,
+                     const uint16_t address)
+{
+  (void)context;
+
+  printf("GB error %d at 0x%04X\n", (int)error, (unsigned int)address);
+  Error_Handler();
+}
+
+static void GB_Init(void)
+{
+  enum gb_init_error_e result;
+  char romName[17];
+
+  result = gb_init(&gb, GB_ReadRom, GB_ReadCartRam, GB_WriteCartRam,
+                   GB_Error, NULL);
+  if (result != GB_INIT_NO_ERROR)
+  {
+    printf("GB init failed: %d\n", (int)result);
+    Error_Handler();
+  }
+
+  printf("GB init OK\n");
+  printf("ROM: %s\n", gb_get_rom_name(&gb, romName));
+}
 
 void StartInputTask(void const *argument)
 {
@@ -84,6 +151,8 @@ void StartDisplayTask(void const *argument)
     LCD_COLOR_BLACK
   };
   uint32_t colorIndex = 0U;
+
+  GB_Init();
 
   for (;;)
   {

@@ -13,8 +13,10 @@ STM32F429I-DISC1에서 Peanut-GB로 내장 ROM을 실행하고, 조이스틱과 
 - 조이스틱 ADC 입력 검증
 - A, B, SELECT, START GPIO 입력 검증
 - FreeRTOS `inputTask`, `displayTask` 분리
+- `inputState` 기반 active-low 입력 비트마스크 및 동시 입력 처리
 - Peanut-GB 헤더 추가
 - 게임 ROM을 `gb_rom.c`, `gb_rom.h`로 변환
+- Peanut-GB ROM/RAM/에러 콜백 및 `gb_init()` 연결
 - 터치 컨트롤러용 I2C3 설정
   - PA8: I2C3 SCL
   - PC9: I2C3 SDA
@@ -35,7 +37,7 @@ STM32F429I-DISC1에서 Peanut-GB로 내장 ROM을 실행하고, 조이스틱과 
 
 `task.c`에 최소한의 프런트엔드 코드를 추가한다. 현재 규모에서는 별도 파일을 더 만들 필요가 없다.
 
-필요한 항목은 다음과 같다.
+현재 구현된 항목은 다음과 같다.
 
 - `struct gb_s` 에뮬레이터 인스턴스
 - ROM 읽기 콜백
@@ -44,9 +46,10 @@ STM32F429I-DISC1에서 Peanut-GB로 내장 ROM을 실행하고, 조이스틱과 
 - 카트리지 RAM 읽기 및 쓰기 콜백
   - 현재 ROM에 맞춰 32 KiB RAM 확보
 - 에러 콜백
-- LCD 한 줄 출력 콜백
 - `gb_init()` 호출
-- `gb_init_lcd()` 호출
+- 초기화 성공 여부와 ROM 이름 UART 출력
+
+다음 단계에서 LCD 한 줄 출력 콜백과 `gb_init_lcd()`를 연결한다.
 
 Boot ROM은 필수가 아니다. Peanut-GB의 기본 초기 상태로 먼저 실행한다.
 
@@ -69,7 +72,7 @@ LTDC는 프레임버퍼를 계속 출력하므로 Peanut-GB의 LCD 콜백에서�
 
 ## 4. 입력을 Peanut-GB에 연결
 
-현재 `inputTask`의 문자열 출력 테스트를 게임 입력 비트마스크 생성 코드로 변경한다.
+`inputTask`는 물리 입력을 `inputState` 8비트 비트마스크로 변환한다. 버튼은 각각 독립적으로 처리하며 조이스틱의 X축과 Y축도 따로 판정하므로 버튼 조합과 대각선 입력을 지원한다.
 
 매핑은 다음과 같다.
 
@@ -88,10 +91,12 @@ Peanut-GB의 조이패드는 active-low 방식이다. 기본값은 `0xFF`이고 
 
 `gb.direct`는 스레드 안전하지 않으므로 `inputTask`가 에뮬레이터 구조체를 직접 수정하지 않도록 한다.
 
-- `inputTask`: 현재 입력을 8비트 전역 상태에 기록
-- `displayTask`: 프레임 시작 전에 입력 상태를 `gb.direct.joypad`에 복사
+- `inputTask`: 현재 입력을 `inputState`에 기록
+- `displayTask`: 프레임 시작 전에 `inputState`를 `gb.direct.joypad`에 복사
 
 8비트 값 하나만 공유하면 별도 큐나 뮤텍스 없이도 현재 MCU에서 충분히 단순하게 처리할 수 있다.
+
+현재 남은 작업은 에뮬레이터 초기화 후 `gb.direct.joypad = inputState`로 상태를 전달하는 것이다.
 
 ## 5. 프레임 실행과 속도 맞추기
 
@@ -104,7 +109,7 @@ Peanut-GB의 조이패드는 active-low 방식이다. 기본값은 `0xFF`이고 
 
 처음에는 단순한 16~17 ms 주기로 실행한다. 실제 속도가 빠르거나 느릴 때만 누적 시간 방식으로 보정한다.
 
-10 ms마다 실행 중인 `printf()` 입력 로그는 게임 구동 전에 제거하거나 필요할 때만 출력해야 한다. 지속적인 UART 출력은 에뮬레이션 속도에 영향을 줄 수 있다.
+입력 로그는 상태가 바뀔 때만 출력한다. 게임 구동 성능에 영향이 있으면 로그를 비활성화한다.
 
 ## 6. 터치로 화면 배율 전환
 
@@ -156,12 +161,12 @@ TouchGFX와 C++는 현재 목표에 필요하지 않다. Peanut-GB와 LCD 출력
 
 ## 권장 작업 순서
 
-1. STMPE811 칩 ID와 좌표 읽기 검증
-2. Peanut-GB 콜백과 카트리지 RAM 작성
-3. `gb_init()` 및 `gb_run_frame()` 실행
-4. 160 x 144 네이티브 화면 출력
-5. 조이스틱과 버튼 연결
-6. 프레임 속도 조정
+1. `gb_init()` 결과와 ROM 이름 UART 확인
+2. LCD 한 줄 출력 콜백과 `gb_init_lcd()` 연결
+3. `gb_run_frame()` 실행 및 160 x 144 네이티브 화면 출력
+4. `inputState`를 `gb.direct.joypad`에 연결
+5. 프레임 속도 조정
+6. STMPE811 칩 ID와 좌표 읽기 검증
 7. 터치 배율 전환
 8. 팔레트 변경
 9. 저장 및 오디오 검토
