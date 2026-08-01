@@ -11,17 +11,24 @@
 
 #define CART_RAM_SIZE             (32 * 1024)
 
-#define LCD_COLOR_BLACK           0x0000
-#define LCD_COLOR_BLUE            0x001F
-#define LCD_COLOR_GREEN           0x07E0
-#define LCD_COLOR_RED             0xF800
-#define LCD_COLOR_MAGENTA         0xF81F
+#define FRAMEBUFFER_ADDRESS       0xD0000000
+#define DISPLAY_WIDTH             240
+#define GAME_SCREEN_X             40
+#define GAME_SCREEN_Y             88
 
 extern volatile uint16_t joystickAdcValues[2];
 
 static struct gb_s gb;
 static uint8_t cartRam[CART_RAM_SIZE];
 static volatile uint8_t inputState = 0xFF;
+
+static const uint16_t gamePalette[4] =
+{
+  0xFFFF,
+  0xAD55,
+  0x52AA,
+  0x0000
+};
 
 static uint8_t GB_ReadRom(struct gb_s *context, const uint_fast32_t address)
 {
@@ -67,6 +74,20 @@ static void GB_Error(struct gb_s *context, const enum gb_error_e error,
   Error_Handler();
 }
 
+static void GB_DrawLine(struct gb_s *context, const uint8_t *pixels,
+                        const uint_fast8_t line)
+{
+  volatile uint16_t *framebuffer = (volatile uint16_t *)FRAMEBUFFER_ADDRESS;
+  uint32_t row = (GAME_SCREEN_Y + line) * DISPLAY_WIDTH + GAME_SCREEN_X;
+
+  (void)context;
+
+  for (uint32_t x = 0; x < LCD_WIDTH; ++x)
+  {
+    framebuffer[row + x] = gamePalette[pixels[x] & LCD_COLOUR];
+  }
+}
+
 static void GB_Init(void)
 {
   enum gb_init_error_e result;
@@ -79,6 +100,8 @@ static void GB_Init(void)
     printf("GB init failed: %d\n", (int)result);
     Error_Handler();
   }
+
+  gb_init_lcd(&gb, GB_DrawLine);
 
   printf("GB init OK\n");
   printf("ROM: %s\n", gb_get_rom_name(&gb, romName));
@@ -142,22 +165,11 @@ void StartInputTask(void const *argument)
 
 void StartDisplayTask(void const *argument)
 {
-  static const uint16_t colors[] =
-  {
-    LCD_COLOR_RED,
-    LCD_COLOR_GREEN,
-    LCD_COLOR_BLUE,
-    LCD_COLOR_MAGENTA,
-    LCD_COLOR_BLACK
-  };
-  uint32_t colorIndex = 0U;
-
   GB_Init();
 
   for (;;)
   {
-    LCD_Fill(colors[colorIndex]);
-    colorIndex = (colorIndex + 1U) % (sizeof(colors) / sizeof(colors[0]));
-    osDelay(1000U);
+    gb.direct.joypad = inputState;
+    gb_run_frame(&gb);
   }
 }

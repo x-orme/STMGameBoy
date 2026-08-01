@@ -14,9 +14,13 @@ STM32F429I-DISC1에서 Peanut-GB로 내장 ROM을 실행하고, 조이스틱과 
 - A, B, SELECT, START GPIO 입력 검증
 - FreeRTOS `inputTask`, `displayTask` 분리
 - `inputState` 기반 active-low 입력 비트마스크 및 동시 입력 처리
+- 게임 내 조이스틱 및 버튼 조작 검증
 - Peanut-GB 헤더 추가
 - 게임 ROM을 `gb_rom.c`, `gb_rom.h`로 변환
 - Peanut-GB ROM/RAM/에러 콜백 및 `gb_init()` 연결
+- LCD 한 줄 출력 콜백 및 `gb_run_frame()` 연결
+- Peanut-GB 게임 화면 출력 검증
+- `inputState`를 Peanut-GB 조이패드에 연결
 - 터치 컨트롤러용 I2C3 설정
   - PA8: I2C3 SCL
   - PC9: I2C3 SDA
@@ -48,8 +52,11 @@ STM32F429I-DISC1에서 Peanut-GB로 내장 ROM을 실행하고, 조이스틱과 
 - 에러 콜백
 - `gb_init()` 호출
 - 초기화 성공 여부와 ROM 이름 UART 출력
+- LCD 한 줄 출력 콜백
+- `gb_init_lcd()` 호출
+- `gb_run_frame()` 호출
 
-다음 단계에서 LCD 한 줄 출력 콜백과 `gb_init_lcd()`를 연결한다.
+현재 코드는 프레임마다 `inputState`를 복사한 뒤 에뮬레이터를 실행한다.
 
 Boot ROM은 필수가 아니다. Peanut-GB의 기본 초기 상태로 먼저 실행한다.
 
@@ -61,7 +68,7 @@ Boot ROM은 필수가 아니다. Peanut-GB의 기본 초기 상태로 먼저 실
 
 ## 3. LCD에 네이티브 화면 출력
 
-게임보이 원본 화면은 160 x 144이고 LCD는 240 x 320이다. 첫 출력은 확대하지 않고 중앙에 배치한다.
+게임보이 원본 화면은 160 x 144이고 LCD는 240 x 320이다. 확대하지 않고 중앙에 배치한다.
 
 - X 오프셋: `(240 - 160) / 2 = 40`
 - Y 오프셋: `(320 - 144) / 2 = 88`
@@ -96,7 +103,7 @@ Peanut-GB의 조이패드는 active-low 방식이다. 기본값은 `0xFF`이고 
 
 8비트 값 하나만 공유하면 별도 큐나 뮤텍스 없이도 현재 MCU에서 충분히 단순하게 처리할 수 있다.
 
-현재 남은 작업은 에뮬레이터 초기화 후 `gb.direct.joypad = inputState`로 상태를 전달하는 것이다.
+`displayTask`가 프레임 시작 전에 `gb.direct.joypad = inputState`로 현재 상태를 전달한다.
 
 ## 5. 프레임 실행과 속도 맞추기
 
@@ -107,7 +114,7 @@ Peanut-GB의 조이패드는 active-low 방식이다. 기본값은 `0xFF`이고 
 - 약 59.7 FPS에 맞춰 다음 프레임까지 대기
 - 한 프레임 목표 시간: 약 16.74 ms
 
-처음에는 단순한 16~17 ms 주기로 실행한다. 실제 속도가 빠르거나 느릴 때만 누적 시간 방식으로 보정한다.
+입력 복사와 프레임 실행은 연결되어 있다. 현재는 별도 지연 없이 실행하며, 실제 프레임 시간을 측정한 뒤 목표 속도에 맞게 보정한다.
 
 입력 로그는 상태가 바뀔 때만 출력한다. 게임 구동 성능에 영향이 있으면 로그를 비활성화한다.
 
@@ -161,15 +168,12 @@ TouchGFX와 C++는 현재 목표에 필요하지 않다. Peanut-GB와 LCD 출력
 
 ## 권장 작업 순서
 
-1. `gb_init()` 결과와 ROM 이름 UART 확인
-2. LCD 한 줄 출력 콜백과 `gb_init_lcd()` 연결
-3. `gb_run_frame()` 실행 및 160 x 144 네이티브 화면 출력
-4. `inputState`를 `gb.direct.joypad`에 연결
-5. 프레임 속도 조정
-6. STMPE811 칩 ID와 좌표 읽기 검증
-7. 터치 배율 전환
-8. 팔레트 변경
-9. 저장 및 오디오 검토
+1. 게임 화면과 조작 동작 확인
+2. 프레임 시간 측정 및 속도 조정
+3. STMPE811 칩 ID와 좌표 읽기 검증
+4. 터치 배율 전환
+5. 팔레트 변경
+6. 저장 및 오디오 검토
 
 ## 예상 소요 시간
 
