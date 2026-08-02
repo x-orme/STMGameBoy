@@ -147,7 +147,7 @@ int __io_getchar(void)
 {
 	uint8_t ch;
 
-	while( HAL_OK != HAL_UART_Receive(&huart1, &ch, 1, HAL_MAX_DELAY) )
+	while( HAL_UART_Receive(&huart1, &ch, 1, HAL_MAX_DELAY) != HAL_OK)
 	{
 		;
 	}

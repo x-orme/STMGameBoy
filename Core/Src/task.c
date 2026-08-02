@@ -29,8 +29,12 @@
 
 #define FRAMEBUFFER_ADDRESS       0xD0000000
 #define DISPLAY_WIDTH             240
-#define GAME_SCREEN_X             48
-#define GAME_SCREEN_Y             80
+#define GAME_SCREEN_WIDTH         260
+#define GAME_SCREEN_HEIGHT        234
+#define GAME_SCREEN_X             3
+#define GAME_SCREEN_Y             30
+#define GAME_SCALE_NUMERATOR      13
+#define GAME_SCALE_DENOMINATOR    8
 
 extern volatile uint16_t joystickAdcValues[2];
 extern I2C_HandleTypeDef hi2c3;
@@ -190,30 +194,40 @@ static void GB_Error(struct gb_s *context, const enum gb_error_e error, const ui
 static void GB_DrawLine(struct gb_s *context, const uint8_t *pixels, const uint_fast8_t line)
 {
   volatile uint16_t *framebuffer = (volatile uint16_t *)FRAMEBUFFER_ADDRESS;
+  uint32_t scaledYStart = (line * GAME_SCALE_NUMERATOR +
+                           GAME_SCALE_DENOMINATOR - 1U) /
+                          GAME_SCALE_DENOMINATOR;
+  uint32_t scaledYEnd = ((line + 1U) * GAME_SCALE_NUMERATOR +
+                         GAME_SCALE_DENOMINATOR - 1U) /
+                        GAME_SCALE_DENOMINATOR;
+  uint32_t scaledXStart = 0U;
 
   (void)context;
 
-  if (frameOrientation == SCREEN_ORIENTATION_90)
+  for (uint32_t x = 0; x < LCD_WIDTH; ++x)
   {
-    uint32_t column = GAME_SCREEN_X + LCD_HEIGHT - 1U - line;
+    uint32_t scaledXEnd = ((x + 1U) * GAME_SCALE_NUMERATOR +
+                           GAME_SCALE_DENOMINATOR - 1U) /
+                          GAME_SCALE_DENOMINATOR;
+    uint16_t color = gamePalette[pixels[x] & LCD_COLOUR];
 
-    for (uint32_t x = 0; x < LCD_WIDTH; ++x)
+    for (uint32_t scaledY = scaledYStart; scaledY < scaledYEnd; ++scaledY)
     {
-      uint32_t row = GAME_SCREEN_Y + x;
-      framebuffer[row * DISPLAY_WIDTH + column] =
-          gamePalette[pixels[x] & LCD_COLOUR];
-    }
-  }
-  else
-  {
-    uint32_t column = GAME_SCREEN_X + line;
+      uint32_t column = frameOrientation == SCREEN_ORIENTATION_90
+                      ? GAME_SCREEN_X + GAME_SCREEN_HEIGHT - 1U - scaledY
+                      : GAME_SCREEN_X + scaledY;
 
-    for (uint32_t x = 0; x < LCD_WIDTH; ++x)
-    {
-      uint32_t row = GAME_SCREEN_Y + LCD_WIDTH - 1U - x;
-      framebuffer[row * DISPLAY_WIDTH + column] =
-          gamePalette[pixels[x] & LCD_COLOUR];
+      for (uint32_t scaledX = scaledXStart;
+           scaledX < scaledXEnd; ++scaledX)
+      {
+        uint32_t row = frameOrientation == SCREEN_ORIENTATION_90
+                     ? GAME_SCREEN_Y + scaledX
+                     : GAME_SCREEN_Y + GAME_SCREEN_WIDTH - 1U - scaledX;
+        framebuffer[row * DISPLAY_WIDTH + column] = color;
+      }
     }
+
+    scaledXStart = scaledXEnd;
   }
 }
 
