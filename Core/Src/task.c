@@ -4,6 +4,7 @@
 #include "peanut_gb.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #define JOYSTICK_ADC_MAX          4095
 #define JOYSTICK_LOW_THRESHOLD    1000
@@ -33,8 +34,8 @@
 #define GAME_SCREEN_HEIGHT        234
 #define GAME_SCREEN_X             3
 #define GAME_SCREEN_Y             30
-#define GAME_SCALE_NUMERATOR      13
-#define GAME_SCALE_DENOMINATOR    8
+#define GB_CLOCK_FREQUENCY        4194304ULL
+#define GB_CYCLES_PER_FRAME       70224ULL
 #define PERFORMANCE_REPORT_MS     1000U
 
 extern volatile uint16_t joystickAdcValues[2];
@@ -52,6 +53,9 @@ static volatile uint8_t inputState = 0xFF;
 static volatile uint8_t touchPressed;
 static volatile ScreenOrientation screenOrientation = SCREEN_ORIENTATION_90;
 static ScreenOrientation frameOrientation = SCREEN_ORIENTATION_90;
+static uint8_t gameFrame[LCD_WIDTH * LCD_HEIGHT];
+static uint8_t scaledXMap[GAME_SCREEN_WIDTH];
+static uint16_t scaledYOffset[GAME_SCREEN_HEIGHT];
 static uint32_t drawCycles;
 
 typedef struct
@@ -91,6 +95,20 @@ static void Performance_Init(void)
 static uint32_t Performance_CyclesToUs(uint64_t cycles)
 {
   return (uint32_t)((cycles * 1000000ULL) / SystemCoreClock);
+}
+
+static void GB_WaitForNextFrame(uint32_t frameStart, uint32_t frameTargetCycles)
+{
+  uint32_t oneMillisecond = SystemCoreClock / 1000U;
+
+  while ((uint32_t)(DWT->CYCCNT - frameStart) + oneMillisecond < frameTargetCycles)
+  {
+    osDelay(1U);
+  }
+
+  while ((uint32_t)(DWT->CYCCNT - frameStart) < frameTargetCycles)
+  {
+  }
 }
 
 static HAL_StatusTypeDef Touch_ReadRegister(uint8_t address, uint8_t *value)
@@ -137,8 +155,7 @@ static HAL_StatusTypeDef Touch_Init(void)
   }
   HAL_Delay(2U);
 
-  for (uint32_t i = 0;
-       i < sizeof(touchInitSequence) / sizeof(touchInitSequence[0]); ++i)
+  for (uint32_t i = 0; i < sizeof(touchInitSequence) / sizeof(touchInitSequence[0]); ++i)
   {
     if (Touch_WriteRegister(touchInitSequence[i].address, touchInitSequence[i].value) != HAL_OK)
     {
@@ -207,42 +224,59 @@ static void GB_Error(struct gb_s *context, const enum gb_error_e error, const ui
 
 static void GB_DrawLine(struct gb_s *context, const uint8_t *pixels, const uint_fast8_t line)
 {
-  volatile uint16_t *framebuffer = (volatile uint16_t *)FRAMEBUFFER_ADDRESS;
   uint32_t startCycles = DWT->CYCCNT;
-  uint32_t scaledYStart = (line * GAME_SCALE_NUMERATOR +
-                           GAME_SCALE_DENOMINATOR - 1U) /
-                          GAME_SCALE_DENOMINATOR;
-  uint32_t scaledYEnd = ((line + 1U) * GAME_SCALE_NUMERATOR +
-                         GAME_SCALE_DENOMINATOR - 1U) /
-                        GAME_SCALE_DENOMINATOR;
-  uint32_t scaledXStart = 0U;
 
   (void)context;
+  memcpy(&gameFrame[line * LCD_WIDTH], pixels, LCD_WIDTH);
+  drawCycles += DWT->CYCCNT - startCycles;
+}
 
-  for (uint32_t x = 0; x < LCD_WIDTH; ++x)
+static void GB_InitScaleMap(void)
+{
+  for (uint32_t x = 0; x < GAME_SCREEN_WIDTH; ++x)
   {
-    uint32_t scaledXEnd = ((x + 1U) * GAME_SCALE_NUMERATOR +
-                           GAME_SCALE_DENOMINATOR - 1U) /
-                          GAME_SCALE_DENOMINATOR;
-    uint16_t color = gamePalette[pixels[x] & LCD_COLOUR];
+    scaledXMap[x] = (uint8_t)(x * LCD_WIDTH / GAME_SCREEN_WIDTH);
+  }
 
-    for (uint32_t scaledY = scaledYStart; scaledY < scaledYEnd; ++scaledY)
+  for (uint32_t y = 0; y < GAME_SCREEN_HEIGHT; ++y)
+  {
+    uint32_t sourceY = y * LCD_HEIGHT / GAME_SCREEN_HEIGHT;
+    scaledYOffset[y] = (uint16_t)(sourceY * LCD_WIDTH);
+  }
+}
+
+static void GB_RenderFrame(void)
+{
+  volatile uint16_t *framebuffer = (volatile uint16_t *)FRAMEBUFFER_ADDRESS;
+  uint32_t startCycles = DWT->CYCCNT;
+
+  if (frameOrientation == SCREEN_ORIENTATION_90)
+  {
+    for (uint32_t row = 0; row < GAME_SCREEN_WIDTH; ++row)
     {
-      uint32_t column = frameOrientation == SCREEN_ORIENTATION_90
-                      ? GAME_SCREEN_X + GAME_SCREEN_HEIGHT - 1U - scaledY
-                      : GAME_SCREEN_X + scaledY;
+      uint32_t sourceX = scaledXMap[row];
+      volatile uint16_t *output = &framebuffer[(GAME_SCREEN_Y + row) * DISPLAY_WIDTH + GAME_SCREEN_X];
 
-      for (uint32_t scaledX = scaledXStart;
-           scaledX < scaledXEnd; ++scaledX)
+      for (uint32_t column = 0; column < GAME_SCREEN_HEIGHT; ++column)
       {
-        uint32_t row = frameOrientation == SCREEN_ORIENTATION_90
-                     ? GAME_SCREEN_Y + scaledX
-                     : GAME_SCREEN_Y + GAME_SCREEN_WIDTH - 1U - scaledX;
-        framebuffer[row * DISPLAY_WIDTH + column] = color;
+        uint32_t sourceOffset = scaledYOffset[GAME_SCREEN_HEIGHT - 1U - column];
+        output[column] = gamePalette[gameFrame[sourceOffset + sourceX] & LCD_COLOUR];
       }
     }
+  }
+  else
+  {
+    for (uint32_t row = 0; row < GAME_SCREEN_WIDTH; ++row)
+    {
+      uint32_t sourceX = scaledXMap[GAME_SCREEN_WIDTH - 1U - row];
+      volatile uint16_t *output = &framebuffer[(GAME_SCREEN_Y + row) * DISPLAY_WIDTH + GAME_SCREEN_X];
 
-    scaledXStart = scaledXEnd;
+      for (uint32_t column = 0; column < GAME_SCREEN_HEIGHT; ++column)
+      {
+        uint32_t sourceOffset = scaledYOffset[column];
+        output[column] = gamePalette[gameFrame[sourceOffset + sourceX] & LCD_COLOUR];
+      }
+    }
   }
 
   drawCycles += DWT->CYCCNT - startCycles;
@@ -260,6 +294,7 @@ static void GB_Init(void)
     Error_Handler();
   }
 
+  GB_InitScaleMap();
   gb_init_lcd(&gb, GB_DrawLine);
 
   printf("GB init OK\n");
@@ -350,9 +385,12 @@ void StartDisplayTask(void const *argument)
   uint32_t maxFrameCycles = 0U;
   uint32_t frameCount = 0U;
   uint32_t reportStart;
+  uint32_t frameTargetCycles;
 
   Performance_Init();
   GB_Init();
+  frameTargetCycles = (uint32_t)(((uint64_t)SystemCoreClock * GB_CYCLES_PER_FRAME) /
+                                 GB_CLOCK_FREQUENCY);
   reportStart = HAL_GetTick();
 
   for (;;)
@@ -366,6 +404,7 @@ void StartDisplayTask(void const *argument)
     drawCycles = 0U;
     frameStart = DWT->CYCCNT;
     gb_run_frame(&gb);
+    GB_RenderFrame();
     frameCycles = DWT->CYCCNT - frameStart;
 
     totalFrameCycles += frameCycles;
@@ -377,6 +416,7 @@ void StartDisplayTask(void const *argument)
       maxFrameCycles = frameCycles;
     }
 
+    GB_WaitForNextFrame(frameStart, frameTargetCycles);
     now = HAL_GetTick();
     if (now - reportStart >= PERFORMANCE_REPORT_MS)
     {
