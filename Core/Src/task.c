@@ -36,27 +36,19 @@
 #define GAME_SCREEN_Y             30
 #define GB_CLOCK_FREQUENCY        4194304ULL
 #define GB_CYCLES_PER_FRAME       70224ULL
-#define PERFORMANCE_REPORT_MS     1000U
 
 extern volatile uint16_t joystickAdcValues[2];
 extern I2C_HandleTypeDef hi2c3;
 
-typedef enum
-{
-  SCREEN_ORIENTATION_90,
-  SCREEN_ORIENTATION_270
-} ScreenOrientation;
-
 static struct gb_s gb;
 static uint8_t cartRam[CART_RAM_SIZE];
 static volatile uint8_t inputState = 0xFF;
-static volatile uint8_t touchPressed;
-static volatile ScreenOrientation screenOrientation = SCREEN_ORIENTATION_90;
-static ScreenOrientation frameOrientation = SCREEN_ORIENTATION_90;
+static uint8_t touchPressed;
+static volatile uint8_t screenFlipped;
+static uint8_t frameFlipped;
 static uint8_t gameFrame[LCD_WIDTH * LCD_HEIGHT];
 static uint8_t scaledXMap[GAME_SCREEN_WIDTH];
 static uint16_t scaledYOffset[GAME_SCREEN_HEIGHT];
-static uint32_t drawCycles;
 
 typedef struct
 {
@@ -85,18 +77,6 @@ static const TouchRegister touchInitSequence[] =
   {STMPE811_REG_INT_STA, 0xFFU}
 };
 
-static void Performance_Init(void)
-{
-  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-  DWT->CYCCNT = 0U;
-  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
-}
-
-static uint32_t Performance_CyclesToUs(uint64_t cycles)
-{
-  return (uint32_t)((cycles * 1000000ULL) / SystemCoreClock);
-}
-
 static void GB_WaitForNextFrame(uint32_t frameStart, uint32_t frameTargetCycles)
 {
   uint32_t oneMillisecond = SystemCoreClock / 1000U;
@@ -109,11 +89,6 @@ static void GB_WaitForNextFrame(uint32_t frameStart, uint32_t frameTargetCycles)
   while ((uint32_t)(DWT->CYCCNT - frameStart) < frameTargetCycles)
   {
   }
-}
-
-static HAL_StatusTypeDef Touch_ReadRegister(uint8_t address, uint8_t *value)
-{
-  return HAL_I2C_Mem_Read(&hi2c3, STMPE811_ADDRESS, address, I2C_MEMADD_SIZE_8BIT, value, 1U, 100U);
 }
 
 static HAL_StatusTypeDef Touch_WriteRegister(uint8_t address, uint8_t value)
@@ -171,7 +146,7 @@ static HAL_StatusTypeDef Touch_ReadPressed(uint8_t *pressed)
 {
   uint8_t status;
 
-  if (Touch_ReadRegister(STMPE811_REG_TSC_CTRL, &status) != HAL_OK)
+  if (HAL_I2C_Mem_Read(&hi2c3, STMPE811_ADDRESS, STMPE811_REG_TSC_CTRL, I2C_MEMADD_SIZE_8BIT, &status, 1U, 100U) != HAL_OK)
   {
     return HAL_ERROR;
   }
@@ -224,11 +199,8 @@ static void GB_Error(struct gb_s *context, const enum gb_error_e error, const ui
 
 static void GB_DrawLine(struct gb_s *context, const uint8_t *pixels, const uint_fast8_t line)
 {
-  uint32_t startCycles = DWT->CYCCNT;
-
   (void)context;
   memcpy(&gameFrame[line * LCD_WIDTH], pixels, LCD_WIDTH);
-  drawCycles += DWT->CYCCNT - startCycles;
 }
 
 static void GB_InitScaleMap(void)
@@ -248,9 +220,8 @@ static void GB_InitScaleMap(void)
 static void GB_RenderFrame(void)
 {
   volatile uint16_t *framebuffer = (volatile uint16_t *)FRAMEBUFFER_ADDRESS;
-  uint32_t startCycles = DWT->CYCCNT;
 
-  if (frameOrientation == SCREEN_ORIENTATION_90)
+  if (!frameFlipped)
   {
     for (uint32_t row = 0; row < GAME_SCREEN_WIDTH; ++row)
     {
@@ -278,8 +249,6 @@ static void GB_RenderFrame(void)
       }
     }
   }
-
-  drawCycles += DWT->CYCCNT - startCycles;
 }
 
 static void GB_Init(void)
@@ -352,25 +321,19 @@ void StartInputTask(void const *argument)
       state &= (uint8_t)~JOYPAD_DOWN;
     }
 
-    if (state != inputState)
-    {
-      inputState = state;
-      printf("Input: 0x%02X\n", inputState);
-    }
+    inputState = state;
+    // printf("Input: 0x%02X\n", inputState);
 
     if (touchReady && Touch_ReadPressed(&pressed) == HAL_OK &&
         pressed != touchPressed)
     {
       touchPressed = pressed;
-      printf("Touch: %s\n", touchPressed ? "pressed" : "released");
+      // printf("Touch: %s\n", touchPressed ? "pressed" : "released");
 
       if (touchPressed)
       {
-        screenOrientation = screenOrientation == SCREEN_ORIENTATION_90
-                          ? SCREEN_ORIENTATION_270
-                          : SCREEN_ORIENTATION_90;
-        printf("Screen: %d degrees\n",
-               screenOrientation == SCREEN_ORIENTATION_90 ? 90 : 270);
+        screenFlipped = !screenFlipped;
+        // printf("Screen flipped\n");
       }
     }
 
@@ -380,62 +343,26 @@ void StartInputTask(void const *argument)
 
 void StartDisplayTask(void const *argument)
 {
-  uint64_t totalFrameCycles = 0U;
-  uint64_t totalDrawCycles = 0U;
-  uint32_t maxFrameCycles = 0U;
-  uint32_t frameCount = 0U;
-  uint32_t reportStart;
   uint32_t frameTargetCycles;
 
-  Performance_Init();
+  // Frame timing was measured with DWT during bring-up.
+  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  DWT->CYCCNT = 0U;
+  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+
   GB_Init();
-  frameTargetCycles = (uint32_t)(((uint64_t)SystemCoreClock * GB_CYCLES_PER_FRAME) /
-                                 GB_CLOCK_FREQUENCY);
-  reportStart = HAL_GetTick();
+  frameTargetCycles = (uint32_t)(((uint64_t)SystemCoreClock * GB_CYCLES_PER_FRAME) / GB_CLOCK_FREQUENCY);
 
   for (;;)
   {
     uint32_t frameStart;
-    uint32_t frameCycles;
-    uint32_t now;
 
     gb.direct.joypad = inputState;
-    frameOrientation = screenOrientation;
-    drawCycles = 0U;
+    frameFlipped = screenFlipped;
     frameStart = DWT->CYCCNT;
     gb_run_frame(&gb);
     GB_RenderFrame();
-    frameCycles = DWT->CYCCNT - frameStart;
-
-    totalFrameCycles += frameCycles;
-    totalDrawCycles += drawCycles;
-    ++frameCount;
-
-    if (frameCycles > maxFrameCycles)
-    {
-      maxFrameCycles = frameCycles;
-    }
 
     GB_WaitForNextFrame(frameStart, frameTargetCycles);
-    now = HAL_GetTick();
-    if (now - reportStart >= PERFORMANCE_REPORT_MS)
-    {
-      uint32_t elapsedMs = now - reportStart;
-      uint32_t fps10 = frameCount * 10000U / elapsedMs;
-      uint32_t averageFrameUs = Performance_CyclesToUs(totalFrameCycles / frameCount);
-      uint32_t averageDrawUs = Performance_CyclesToUs(totalDrawCycles / frameCount);
-      uint32_t averageCoreUs = averageFrameUs - averageDrawUs;
-      uint32_t maxFrameUs = Performance_CyclesToUs(maxFrameCycles);
-
-      printf("Perf: %lu.%lu FPS, frame %lu us, draw %lu us, core %lu us, max %lu us\n",
-             fps10 / 10U, fps10 % 10U, averageFrameUs,
-             averageDrawUs, averageCoreUs, maxFrameUs);
-
-      totalFrameCycles = 0U;
-      totalDrawCycles = 0U;
-      maxFrameCycles = 0U;
-      frameCount = 0U;
-      reportStart = HAL_GetTick();
-    }
   }
 }
