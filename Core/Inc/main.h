@@ -36,6 +36,11 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
+typedef enum
+{
+  LCD_ORIENTATION_90 = 0xC8U,
+  LCD_ORIENTATION_270 = 0x08U
+} LcdOrientation;
 
 /* USER CODE END ET */
 
@@ -54,6 +59,7 @@ void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
 void LCD_Fill(uint16_t color);
+HAL_StatusTypeDef LCD_SetOrientation(LcdOrientation orientation);
 
 /* USER CODE END EFP */
 

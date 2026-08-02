@@ -9,6 +9,22 @@
 #define JOYSTICK_LOW_THRESHOLD    1000
 #define JOYSTICK_HIGH_THRESHOLD   3000
 
+#define STMPE811_ADDRESS          0x82
+#define STMPE811_CHIP_ID          0x0811
+#define STMPE811_REG_CHIP_ID      0x00
+#define STMPE811_REG_SYS_CTRL1    0x03
+#define STMPE811_REG_SYS_CTRL2    0x04
+#define STMPE811_REG_INT_STA      0x0B
+#define STMPE811_REG_IO_AF        0x17
+#define STMPE811_REG_ADC_CTRL1    0x20
+#define STMPE811_REG_ADC_CTRL2    0x21
+#define STMPE811_REG_TSC_CTRL     0x40
+#define STMPE811_REG_TSC_CFG      0x41
+#define STMPE811_REG_FIFO_TH      0x4A
+#define STMPE811_REG_FIFO_STA     0x4B
+#define STMPE811_REG_TSC_FRACT    0x56
+#define STMPE811_REG_TSC_DRIVE    0x58
+
 #define CART_RAM_SIZE             (32 * 1024)
 
 #define FRAMEBUFFER_ADDRESS       0xD0000000
@@ -17,10 +33,19 @@
 #define GAME_SCREEN_Y             88
 
 extern volatile uint16_t joystickAdcValues[2];
+extern I2C_HandleTypeDef hi2c3;
 
 static struct gb_s gb;
 static uint8_t cartRam[CART_RAM_SIZE];
 static volatile uint8_t inputState = 0xFF;
+static volatile uint8_t touchPressed;
+static LcdOrientation lcdOrientation = LCD_ORIENTATION_90;
+
+typedef struct
+{
+  uint8_t address;
+  uint8_t value;
+} TouchRegister;
 
 static const uint16_t gamePalette[4] =
 {
@@ -29,6 +54,89 @@ static const uint16_t gamePalette[4] =
   0x52AA,
   0x0000
 };
+
+static const TouchRegister touchInitSequence[] =
+{
+  {STMPE811_REG_ADC_CTRL2, 0x01U},
+  {STMPE811_REG_TSC_CFG, 0x9AU},
+  {STMPE811_REG_FIFO_TH, 0x01U},
+  {STMPE811_REG_FIFO_STA, 0x01U},
+  {STMPE811_REG_FIFO_STA, 0x00U},
+  {STMPE811_REG_TSC_FRACT, 0x01U},
+  {STMPE811_REG_TSC_DRIVE, 0x01U},
+  {STMPE811_REG_TSC_CTRL, 0x73U},
+  {STMPE811_REG_INT_STA, 0xFFU}
+};
+
+static HAL_StatusTypeDef Touch_ReadRegister(uint8_t address, uint8_t *value)
+{
+  return HAL_I2C_Mem_Read(&hi2c3, STMPE811_ADDRESS, address, I2C_MEMADD_SIZE_8BIT, value, 1U, 100U);
+}
+
+static HAL_StatusTypeDef Touch_WriteRegister(uint8_t address, uint8_t value)
+{
+  return HAL_I2C_Mem_Write(&hi2c3, STMPE811_ADDRESS, address, I2C_MEMADD_SIZE_8BIT, &value, 1U, 100U);
+}
+
+static HAL_StatusTypeDef Touch_Init(void)
+{
+  uint8_t id[2];
+
+  if (HAL_I2C_Mem_Read(&hi2c3, STMPE811_ADDRESS, STMPE811_REG_CHIP_ID, I2C_MEMADD_SIZE_8BIT, id, sizeof(id), 100U) != HAL_OK)
+  {
+    return HAL_ERROR;
+  }
+
+  if ((((uint16_t)id[0] << 8) | id[1]) != STMPE811_CHIP_ID)
+  {
+    return HAL_ERROR;
+  }
+
+  if (Touch_WriteRegister(STMPE811_REG_SYS_CTRL1, 0x02U) != HAL_OK)
+  {
+    return HAL_ERROR;
+  }
+  HAL_Delay(10U);
+
+  if (Touch_WriteRegister(STMPE811_REG_SYS_CTRL1, 0x00U) != HAL_OK)
+  {
+    return HAL_ERROR;
+  }
+  HAL_Delay(2U);
+
+  if (Touch_WriteRegister(STMPE811_REG_SYS_CTRL2, 0x08U) != HAL_OK ||
+      Touch_WriteRegister(STMPE811_REG_IO_AF, 0x0FU) != HAL_OK ||
+      Touch_WriteRegister(STMPE811_REG_ADC_CTRL1, 0x48U) != HAL_OK)
+  {
+    return HAL_ERROR;
+  }
+  HAL_Delay(2U);
+
+  for (uint32_t i = 0;
+       i < sizeof(touchInitSequence) / sizeof(touchInitSequence[0]); ++i)
+  {
+    if (Touch_WriteRegister(touchInitSequence[i].address, touchInitSequence[i].value) != HAL_OK)
+    {
+      return HAL_ERROR;
+    }
+  }
+
+  HAL_Delay(2U);
+  return HAL_OK;
+}
+
+static HAL_StatusTypeDef Touch_ReadPressed(uint8_t *pressed)
+{
+  uint8_t status;
+
+  if (Touch_ReadRegister(STMPE811_REG_TSC_CTRL, &status) != HAL_OK)
+  {
+    return HAL_ERROR;
+  }
+
+  *pressed = (status & 0x80U) != 0U;
+  return HAL_OK;
+}
 
 static uint8_t GB_ReadRom(struct gb_s *context, const uint_fast32_t address)
 {
@@ -54,8 +162,7 @@ static uint8_t GB_ReadCartRam(struct gb_s *context, const uint_fast32_t address)
   return cartRam[address];
 }
 
-static void GB_WriteCartRam(struct gb_s *context, const uint_fast32_t address,
-                            const uint8_t value)
+static void GB_WriteCartRam(struct gb_s *context, const uint_fast32_t address, const uint8_t value)
 {
   (void)context;
 
@@ -65,8 +172,7 @@ static void GB_WriteCartRam(struct gb_s *context, const uint_fast32_t address,
   }
 }
 
-static void GB_Error(struct gb_s *context, const enum gb_error_e error,
-                     const uint16_t address)
+static void GB_Error(struct gb_s *context, const enum gb_error_e error, const uint16_t address)
 {
   (void)context;
 
@@ -74,8 +180,7 @@ static void GB_Error(struct gb_s *context, const enum gb_error_e error,
   Error_Handler();
 }
 
-static void GB_DrawLine(struct gb_s *context, const uint8_t *pixels,
-                        const uint_fast8_t line)
+static void GB_DrawLine(struct gb_s *context, const uint8_t *pixels, const uint_fast8_t line)
 {
   volatile uint16_t *framebuffer = (volatile uint16_t *)FRAMEBUFFER_ADDRESS;
   uint32_t row = (GAME_SCREEN_Y + line) * DISPLAY_WIDTH + GAME_SCREEN_X;
@@ -93,8 +198,7 @@ static void GB_Init(void)
   enum gb_init_error_e result;
   char romName[17];
 
-  result = gb_init(&gb, GB_ReadRom, GB_ReadCartRam, GB_WriteCartRam,
-                   GB_Error, NULL);
+  result = gb_init(&gb, GB_ReadRom, GB_ReadCartRam, GB_WriteCartRam, GB_Error, NULL);
   if (result != GB_INIT_NO_ERROR)
   {
     printf("GB init failed: %d\n", (int)result);
@@ -109,11 +213,16 @@ static void GB_Init(void)
 
 void StartInputTask(void const *argument)
 {
+  uint8_t touchReady = Touch_Init() == HAL_OK;
+
+  printf("Touch init %s\n", touchReady ? "OK" : "failed");
+
   for (;;)
   {
     uint16_t joystickX = JOYSTICK_ADC_MAX - joystickAdcValues[1];
     uint16_t joystickY = joystickAdcValues[0];
     uint8_t state = 0xFF;
+    uint8_t pressed;
 
     if (HAL_GPIO_ReadPin(btnA_GPIO_Port, btnA_Pin) == GPIO_PIN_RESET)
     {
@@ -157,6 +266,30 @@ void StartInputTask(void const *argument)
     {
       inputState = state;
       printf("Input: 0x%02X\n", inputState);
+    }
+
+    if (touchReady && Touch_ReadPressed(&pressed) == HAL_OK &&
+        pressed != touchPressed)
+    {
+      touchPressed = pressed;
+      printf("Touch: %s\n", touchPressed ? "pressed" : "released");
+
+      if (touchPressed)
+      {
+        lcdOrientation = lcdOrientation == LCD_ORIENTATION_90
+                       ? LCD_ORIENTATION_270
+                       : LCD_ORIENTATION_90;
+
+        if (LCD_SetOrientation(lcdOrientation) == HAL_OK)
+        {
+          printf("Screen: %d degrees\n",
+                 lcdOrientation == LCD_ORIENTATION_90 ? 90 : 270);
+        }
+        else
+        {
+          printf("Screen rotation failed\n");
+        }
+      }
     }
 
     osDelay(10U);

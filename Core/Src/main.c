@@ -91,7 +91,7 @@ static const LcdInitCommand lcdInitSequence[] =
   {0xC1, 1,   0, {0x10}},
   {0xC5, 2,   0, {0x45, 0x15}},
   {0xC7, 1,   0, {0x90}},
-  {0x36, 1,   0, {0xC8}},
+  {0x36, 1,   0, {LCD_ORIENTATION_90}},
   {0xF2, 1,   0, {0x00}},
   {0xB0, 1,   0, {0xC2}},
   {0xB6, 4,   0, {0x0A, 0xA7, 0x27, 0x04}},
@@ -137,10 +137,10 @@ static HAL_StatusTypeDef LCD_Init(void);
 
 int __io_putchar(int ch)
 {
- if ( ch == '\n' )
-	 HAL_UART_Transmit(&huart1, (uint8_t*)&"\r", 1, HAL_MAX_DELAY);
- HAL_UART_Transmit(&huart1, (uint8_t*)&ch, 1, HAL_MAX_DELAY);
- return ch;
+  if ( ch == '\n' )
+	  HAL_UART_Transmit(&huart1, (uint8_t*)&"\r", 1, HAL_MAX_DELAY);
+  HAL_UART_Transmit(&huart1, (uint8_t*)&ch, 1, HAL_MAX_DELAY);
+  return ch;
 }
 
 int __io_getchar(void)
@@ -249,6 +249,14 @@ void LCD_Fill(uint16_t color)
   {
     framebuffer[i] = color;
   }
+}
+
+HAL_StatusTypeDef LCD_SetOrientation(LcdOrientation orientation)
+{
+  LcdInitCommand command = {0x36U, 1U, 0U, {0}};
+
+  command.data[0] = (uint8_t)orientation;
+  return LCD_Write(&command);
 }
 
 /* USER CODE END 0 */
