@@ -77,7 +77,7 @@ static const TouchRegister touchInitSequence[] =
   {STMPE811_REG_INT_STA, 0xFFU}
 };
 
-static void GB_WaitForNextFrame(uint32_t frameStart, uint32_t frameTargetCycles)
+static void gbWaitForNextFrame(uint32_t frameStart, uint32_t frameTargetCycles)
 {
   uint32_t oneMillisecond = SystemCoreClock / 1000U;
 
@@ -88,15 +88,16 @@ static void GB_WaitForNextFrame(uint32_t frameStart, uint32_t frameTargetCycles)
 
   while ((uint32_t)(DWT->CYCCNT - frameStart) < frameTargetCycles)
   {
+    ;
   }
 }
 
-static HAL_StatusTypeDef Touch_WriteRegister(uint8_t address, uint8_t value)
+static HAL_StatusTypeDef touchWriteRegister(uint8_t address, uint8_t value)
 {
   return HAL_I2C_Mem_Write(&hi2c3, STMPE811_ADDRESS, address, I2C_MEMADD_SIZE_8BIT, &value, 1U, 100U);
 }
 
-static HAL_StatusTypeDef Touch_Init(void)
+static HAL_StatusTypeDef touchInit(void)
 {
   uint8_t id[2];
 
@@ -110,21 +111,21 @@ static HAL_StatusTypeDef Touch_Init(void)
     return HAL_ERROR;
   }
 
-  if (Touch_WriteRegister(STMPE811_REG_SYS_CTRL1, 0x02U) != HAL_OK)
+  if (touchWriteRegister(STMPE811_REG_SYS_CTRL1, 0x02U) != HAL_OK)
   {
     return HAL_ERROR;
   }
   HAL_Delay(10U);
 
-  if (Touch_WriteRegister(STMPE811_REG_SYS_CTRL1, 0x00U) != HAL_OK)
+  if (touchWriteRegister(STMPE811_REG_SYS_CTRL1, 0x00U) != HAL_OK)
   {
     return HAL_ERROR;
   }
   HAL_Delay(2U);
 
-  if (Touch_WriteRegister(STMPE811_REG_SYS_CTRL2, 0x08U) != HAL_OK ||
-      Touch_WriteRegister(STMPE811_REG_IO_AF, 0x0FU) != HAL_OK ||
-      Touch_WriteRegister(STMPE811_REG_ADC_CTRL1, 0x48U) != HAL_OK)
+  if (touchWriteRegister(STMPE811_REG_SYS_CTRL2, 0x08U) != HAL_OK ||
+      touchWriteRegister(STMPE811_REG_IO_AF, 0x0FU) != HAL_OK ||
+      touchWriteRegister(STMPE811_REG_ADC_CTRL1, 0x48U) != HAL_OK)
   {
     return HAL_ERROR;
   }
@@ -132,7 +133,7 @@ static HAL_StatusTypeDef Touch_Init(void)
 
   for (uint32_t i = 0; i < sizeof(touchInitSequence) / sizeof(touchInitSequence[0]); ++i)
   {
-    if (Touch_WriteRegister(touchInitSequence[i].address, touchInitSequence[i].value) != HAL_OK)
+    if (touchWriteRegister(touchInitSequence[i].address, touchInitSequence[i].value) != HAL_OK)
     {
       return HAL_ERROR;
     }
@@ -142,7 +143,7 @@ static HAL_StatusTypeDef Touch_Init(void)
   return HAL_OK;
 }
 
-static HAL_StatusTypeDef Touch_ReadPressed(uint8_t *pressed)
+static HAL_StatusTypeDef touchReadPressed(uint8_t *pressed)
 {
   uint8_t status;
 
@@ -155,7 +156,7 @@ static HAL_StatusTypeDef Touch_ReadPressed(uint8_t *pressed)
   return HAL_OK;
 }
 
-static uint8_t GB_ReadRom(struct gb_s *context, const uint_fast32_t address)
+static uint8_t gbReadRom(struct gb_s *context, const uint_fast32_t address)
 {
   (void)context;
 
@@ -167,7 +168,7 @@ static uint8_t GB_ReadRom(struct gb_s *context, const uint_fast32_t address)
   return gbRomData[address];
 }
 
-static uint8_t GB_ReadCartRam(struct gb_s *context, const uint_fast32_t address)
+static uint8_t gbReadCartRam(struct gb_s *context, const uint_fast32_t address)
 {
   (void)context;
 
@@ -179,7 +180,7 @@ static uint8_t GB_ReadCartRam(struct gb_s *context, const uint_fast32_t address)
   return cartRam[address];
 }
 
-static void GB_WriteCartRam(struct gb_s *context, const uint_fast32_t address, const uint8_t value)
+static void gbWriteCartRam(struct gb_s *context, const uint_fast32_t address, const uint8_t value)
 {
   (void)context;
 
@@ -189,7 +190,7 @@ static void GB_WriteCartRam(struct gb_s *context, const uint_fast32_t address, c
   }
 }
 
-static void GB_Error(struct gb_s *context, const enum gb_error_e error, const uint16_t address)
+static void gbHandleError(struct gb_s *context, const enum gb_error_e error, const uint16_t address)
 {
   (void)context;
 
@@ -197,13 +198,13 @@ static void GB_Error(struct gb_s *context, const enum gb_error_e error, const ui
   Error_Handler();
 }
 
-static void GB_DrawLine(struct gb_s *context, const uint8_t *pixels, const uint_fast8_t line)
+static void gbDrawLine(struct gb_s *context, const uint8_t *pixels, const uint_fast8_t line)
 {
   (void)context;
   memcpy(&gameFrame[line * LCD_WIDTH], pixels, LCD_WIDTH);
 }
 
-static void GB_InitScaleMap(void)
+static void gbInitScaleMap(void)
 {
   for (uint32_t x = 0; x < GAME_SCREEN_WIDTH; ++x)
   {
@@ -217,7 +218,7 @@ static void GB_InitScaleMap(void)
   }
 }
 
-static void GB_RenderFrame(void)
+static void gbRenderFrame(void)
 {
   volatile uint16_t *framebuffer = (volatile uint16_t *)FRAMEBUFFER_ADDRESS;
 
@@ -251,20 +252,20 @@ static void GB_RenderFrame(void)
   }
 }
 
-static void GB_Init(void)
+static void gbInit(void)
 {
   enum gb_init_error_e result;
   char romName[17];
 
-  result = gb_init(&gb, GB_ReadRom, GB_ReadCartRam, GB_WriteCartRam, GB_Error, NULL);
+  result = gb_init(&gb, gbReadRom, gbReadCartRam, gbWriteCartRam, gbHandleError, NULL);
   if (result != GB_INIT_NO_ERROR)
   {
     printf("GB init failed: %d\n", (int)result);
     Error_Handler();
   }
 
-  GB_InitScaleMap();
-  gb_init_lcd(&gb, GB_DrawLine);
+  gbInitScaleMap();
+  gb_init_lcd(&gb, gbDrawLine);
 
   printf("GB init OK\n");
   printf("ROM: %s\n", gb_get_rom_name(&gb, romName));
@@ -272,7 +273,7 @@ static void GB_Init(void)
 
 void StartInputTask(void const *argument)
 {
-  uint8_t touchReady = Touch_Init() == HAL_OK;
+  uint8_t touchReady = touchInit() == HAL_OK;
 
   printf("Touch init %s\n", touchReady ? "OK" : "failed");
 
@@ -324,7 +325,7 @@ void StartInputTask(void const *argument)
     inputState = state;
     // printf("Input: 0x%02X\n", inputState);
 
-    if (touchReady && Touch_ReadPressed(&pressed) == HAL_OK &&
+    if (touchReady && touchReadPressed(&pressed) == HAL_OK &&
         pressed != touchPressed)
     {
       touchPressed = pressed;
@@ -345,12 +346,11 @@ void StartDisplayTask(void const *argument)
 {
   uint32_t frameTargetCycles;
 
-  // Frame timing was measured with DWT during bring-up.
   CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
   DWT->CYCCNT = 0U;
   DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 
-  GB_Init();
+  gbInit();
   frameTargetCycles = (uint32_t)(((uint64_t)SystemCoreClock * GB_CYCLES_PER_FRAME) / GB_CLOCK_FREQUENCY);
 
   for (;;)
@@ -361,8 +361,8 @@ void StartDisplayTask(void const *argument)
     frameFlipped = screenFlipped;
     frameStart = DWT->CYCCNT;
     gb_run_frame(&gb);
-    GB_RenderFrame();
+    gbRenderFrame();
 
-    GB_WaitForNextFrame(frameStart, frameTargetCycles);
+    gbWaitForNextFrame(frameStart, frameTargetCycles);
   }
 }

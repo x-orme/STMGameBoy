@@ -126,9 +126,9 @@ extern void StartDisplayTask(void const * argument);
 extern void StartInputTask(void const * argument);
 
 /* USER CODE BEGIN PFP */
-static HAL_StatusTypeDef LCD_Write(const LcdInitCommand *item);
-static HAL_StatusTypeDef SDRAM_InitSequence(void);
-static HAL_StatusTypeDef LCD_Init(void);
+static HAL_StatusTypeDef lcdWrite(const LcdInitCommand *item);
+static HAL_StatusTypeDef sdramInitSequence(void);
+static HAL_StatusTypeDef lcdInit(void);
 
 /* USER CODE END PFP */
 
@@ -154,7 +154,7 @@ int __io_getchar(void)
 	return ch;
 }
 
-static HAL_StatusTypeDef LCD_Write(const LcdInitCommand *item)
+static HAL_StatusTypeDef lcdWrite(const LcdInitCommand *item)
 {
   HAL_GPIO_WritePin(WRX_DCX_GPIO_Port, WRX_DCX_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(CSX_GPIO_Port, CSX_Pin, GPIO_PIN_RESET);
@@ -185,7 +185,7 @@ static HAL_StatusTypeDef LCD_Write(const LcdInitCommand *item)
   return HAL_OK;
 }
 
-static HAL_StatusTypeDef SDRAM_InitSequence(void)
+static HAL_StatusTypeDef sdramInitSequence(void)
 {
   FMC_SDRAM_CommandTypeDef command = {0};
 
@@ -224,24 +224,24 @@ static HAL_StatusTypeDef SDRAM_InitSequence(void)
   return HAL_SDRAM_ProgramRefreshRate(&hsdram1, SDRAM_REFRESH_COUNT);
 }
 
-static HAL_StatusTypeDef LCD_Init(void)
+static HAL_StatusTypeDef lcdInit(void)
 {
   HAL_GPIO_WritePin(NCS_MEMS_SPI_GPIO_Port, NCS_MEMS_SPI_Pin, GPIO_PIN_SET);
   HAL_GPIO_WritePin(CSX_GPIO_Port, CSX_Pin, GPIO_PIN_SET);
 
   for (uint32_t i = 0U; i < sizeof(lcdInitSequence) / sizeof(lcdInitSequence[0]); ++i)
   {
-    if (LCD_Write(&lcdInitSequence[i]) != HAL_OK)
+    if (lcdWrite(&lcdInitSequence[i]) != HAL_OK)
     {
       return HAL_ERROR;
     }
   }
 
-  LCD_Fill(LCD_COLOR_BLACK);
+  lcdFill(LCD_COLOR_BLACK);
   return HAL_OK;
 }
 
-void LCD_Fill(uint16_t color)
+void lcdFill(uint16_t color)
 {
   volatile uint16_t *framebuffer = (volatile uint16_t *)LCD_FRAMEBUFFER_ADDRESS;
 
@@ -293,7 +293,7 @@ int main(void)
   MX_TIM3_Init();
   MX_I2C3_Init();
   /* USER CODE BEGIN 2 */
-  if (LCD_Init() != HAL_OK)
+  if (lcdInit() != HAL_OK)
   {
     Error_Handler();
   }
@@ -836,7 +836,7 @@ static void MX_FMC_Init(void)
   }
 
   /* USER CODE BEGIN FMC_Init 2 */
-  if (SDRAM_InitSequence() != HAL_OK)
+  if (sdramInitSequence() != HAL_OK)
   {
     Error_Handler();
   }
