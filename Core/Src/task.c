@@ -29,17 +29,24 @@
 
 #define FRAMEBUFFER_ADDRESS       0xD0000000
 #define DISPLAY_WIDTH             240
-#define GAME_SCREEN_X             40
-#define GAME_SCREEN_Y             88
+#define GAME_SCREEN_X             48
+#define GAME_SCREEN_Y             80
 
 extern volatile uint16_t joystickAdcValues[2];
 extern I2C_HandleTypeDef hi2c3;
+
+typedef enum
+{
+  SCREEN_ORIENTATION_90,
+  SCREEN_ORIENTATION_270
+} ScreenOrientation;
 
 static struct gb_s gb;
 static uint8_t cartRam[CART_RAM_SIZE];
 static volatile uint8_t inputState = 0xFF;
 static volatile uint8_t touchPressed;
-static LcdOrientation lcdOrientation = LCD_ORIENTATION_90;
+static volatile ScreenOrientation screenOrientation = SCREEN_ORIENTATION_90;
+static ScreenOrientation frameOrientation = SCREEN_ORIENTATION_90;
 
 typedef struct
 {
@@ -183,13 +190,30 @@ static void GB_Error(struct gb_s *context, const enum gb_error_e error, const ui
 static void GB_DrawLine(struct gb_s *context, const uint8_t *pixels, const uint_fast8_t line)
 {
   volatile uint16_t *framebuffer = (volatile uint16_t *)FRAMEBUFFER_ADDRESS;
-  uint32_t row = (GAME_SCREEN_Y + line) * DISPLAY_WIDTH + GAME_SCREEN_X;
 
   (void)context;
 
-  for (uint32_t x = 0; x < LCD_WIDTH; ++x)
+  if (frameOrientation == SCREEN_ORIENTATION_90)
   {
-    framebuffer[row + x] = gamePalette[pixels[x] & LCD_COLOUR];
+    uint32_t column = GAME_SCREEN_X + LCD_HEIGHT - 1U - line;
+
+    for (uint32_t x = 0; x < LCD_WIDTH; ++x)
+    {
+      uint32_t row = GAME_SCREEN_Y + x;
+      framebuffer[row * DISPLAY_WIDTH + column] =
+          gamePalette[pixels[x] & LCD_COLOUR];
+    }
+  }
+  else
+  {
+    uint32_t column = GAME_SCREEN_X + line;
+
+    for (uint32_t x = 0; x < LCD_WIDTH; ++x)
+    {
+      uint32_t row = GAME_SCREEN_Y + LCD_WIDTH - 1U - x;
+      framebuffer[row * DISPLAY_WIDTH + column] =
+          gamePalette[pixels[x] & LCD_COLOUR];
+    }
   }
 }
 
@@ -276,19 +300,11 @@ void StartInputTask(void const *argument)
 
       if (touchPressed)
       {
-        lcdOrientation = lcdOrientation == LCD_ORIENTATION_90
-                       ? LCD_ORIENTATION_270
-                       : LCD_ORIENTATION_90;
-
-        if (LCD_SetOrientation(lcdOrientation) == HAL_OK)
-        {
-          printf("Screen: %d degrees\n",
-                 lcdOrientation == LCD_ORIENTATION_90 ? 90 : 270);
-        }
-        else
-        {
-          printf("Screen rotation failed\n");
-        }
+        screenOrientation = screenOrientation == SCREEN_ORIENTATION_90
+                          ? SCREEN_ORIENTATION_270
+                          : SCREEN_ORIENTATION_90;
+        printf("Screen: %d degrees\n",
+               screenOrientation == SCREEN_ORIENTATION_90 ? 90 : 270);
       }
     }
 
@@ -303,6 +319,7 @@ void StartDisplayTask(void const *argument)
   for (;;)
   {
     gb.direct.joypad = inputState;
+    frameOrientation = screenOrientation;
     gb_run_frame(&gb);
   }
 }
