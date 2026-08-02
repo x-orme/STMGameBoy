@@ -3,7 +3,8 @@
 
 # STM32CubeIDE workspace
 .metadata/
-.settings/
+.settings/*
+!.settings/org.eclipse.core.resources.prefs
 
 # STM32 build outputs
 Debug/
